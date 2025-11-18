@@ -3,13 +3,29 @@ import os
 import time
 import random
 import string
-import re
 
 class AuthenticationSystem:
     def __init__(self):
         self.password_file = "password.txt"
         self.failed_attempts = {}
         self.lock_times = {}
+        self.banned_users = set()
+        self.load_banned_users()
+    
+    def load_banned_users(self):
+        """Charge les utilisateurs bannis depuis un fichier"""
+        try:
+            with open("banned_users.txt", "r") as file:
+                for line in file:
+                    self.banned_users.add(line.strip())
+        except FileNotFoundError:
+            pass
+    
+    def save_banned_user(self, username):
+        """Sauvegarde l'utilisateur banni dans un fichier"""
+        self.banned_users.add(username)
+        with open("banned_users.txt", "a") as file:
+            file.write(username + "\n")
     
     def clear_screen(self):
         """Nettoie l'écran de la console"""
@@ -113,6 +129,13 @@ class AuthenticationSystem:
         print(f"🔒 Hash stocké: {hashed_password}")
         input("Appuyez sur Entrée pour continuer...")
     
+    def is_account_banned(self, username):
+        """Vérifie si le compte est banni définitivement"""
+        if username in self.banned_users:
+            print("🚫 COMPTE BANNI DÉFINITIVEMENT - Accès refusé")
+            return True
+        return False
+    
     def is_account_locked(self, username):
         """Vérifie si le compte est temporairement bloqué"""
         if username in self.lock_times:
@@ -127,14 +150,20 @@ class AuthenticationSystem:
     
     def get_lock_duration(self, failed_count):
         """Retourne la durée de blocage selon le nombre d'échecs"""
-        if failed_count <= 3:
+        if failed_count == 3:
             return 5
-        elif failed_count <= 6:
+        elif failed_count == 6:
             return 10
-        elif failed_count <= 9:
+        elif failed_count == 9:
             return 15
-        else:
+        elif failed_count >= 12:
             return 20
+    
+    def ban_user(self, username):
+        """Bannit définitivement l'utilisateur"""
+        print("🚫 COMPTE BANNI DÉFINITIVEMENT - Trop de tentatives échouées")
+        self.save_banned_user(username)
+        input("Appuyez sur Entrée pour continuer...")
     
     def signin(self):
         """Fonction de connexion avec gestion des tentatives échouées"""
@@ -151,7 +180,12 @@ class AuthenticationSystem:
             input("Appuyez sur Entrée pour continuer...")
             return
         
-        # Vérification si le compte est bloqué
+        # Vérification si le compte est banni
+        if self.is_account_banned(username):
+            input("Appuyez sur Entrée pour continuer...")
+            return
+        
+        # Vérification si le compte est bloqué temporairement
         if self.is_account_locked(username):
             input("Appuyez sur Entrée pour continuer...")
             return
@@ -180,42 +214,50 @@ class AuthenticationSystem:
             return
         
         # Gestion des tentatives de mot de passe
-        password = input("Mot de passe: ").strip()
+        attempts = 0
+        max_attempts = 3
         
-        # Calcul du hash pour vérification
-        calculated_hash = self.hash_password(password, user_data['salt'])
-        
-        if calculated_hash == user_data['hash']:
-            # Connexion réussie
-            print("✅ Connexion réussie!")
-            self.failed_attempts[username] = 0  # Réinitialiser les tentatives échouées
-            input("Appuyez sur Entrée pour continuer...")
-        else:
-            # Mot de passe incorrect
-            self.failed_attempts[username] = self.failed_attempts.get(username, 0) + 1
-            failed_count = self.failed_attempts[username]
+        while attempts < max_attempts:
+            password = input("Mot de passe: ").strip()
             
-            print(f"❌ Mot de passe incorrect. Tentative {failed_count}/3")
+            # Calcul du hash pour vérification
+            calculated_hash = self.hash_password(password, user_data['salt'])
             
-            if failed_count >= 3:
-                lock_duration = self.get_lock_duration(failed_count)
+            if calculated_hash == user_data['hash']:
+                # Connexion réussie
+                print("✅ Connexion réussie!")
+                self.failed_attempts[username] = 0  # Réinitialiser les tentatives échouées
+                input("Appuyez sur Entrée pour continuer...")
+                return
+            else:
+                # Mot de passe incorrect
+                attempts += 1
+                self.failed_attempts[username] = self.failed_attempts.get(username, 0) + 1
+                failed_count = self.failed_attempts[username]
                 
-                if failed_count >= 12:  # Après 12 tentatives échouées
-                    print("🚫 Compte banni définitivement!")
-                    # Ici on pourrait implémenter un bannissement permanent
+                remaining_attempts = max_attempts - attempts
+                print(f"❌ Mot de passe incorrect. Tentative {attempts}/{max_attempts}")
+                
+                if attempts < max_attempts:
+                    print(f"⚠️ Il vous reste {remaining_attempts} tentative(s)")
+                    continue
+                else:
+                    # Blocage après 3 échecs
+                    if failed_count >= 12:
+                        self.ban_user(username)
+                        return
+                    
+                    lock_duration = self.get_lock_duration(failed_count)
+                    print(f"🔒 Compte bloqué pendant {lock_duration} secondes")
+                    self.lock_times[username] = time.time() + lock_duration
+                    
+                    # Attente du déblocage
+                    for i in range(lock_duration, 0, -1):
+                        print(f"Temps restant: {i} secondes", end='\r')
+                        time.sleep(1)
+                    print("Compte débloqué! Vous pouvez réessayer.")
                     input("Appuyez sur Entrée pour continuer...")
                     return
-                
-                print(f"🔒 Compte bloqué pendant {lock_duration} secondes")
-                self.lock_times[username] = time.time() + lock_duration
-                
-                # Attente du déblocage
-                for i in range(lock_duration, 0, -1):
-                    print(f"Temps restant: {i} secondes", end='\r')
-                    time.sleep(1)
-                print("Compte débloqué! Vous pouvez réessayer.")
-            
-            input("Appuyez sur Entrée pour continuer...")
     
     def display_menu(self):
         """Affiche le menu principal"""
@@ -252,7 +294,6 @@ def demonstrate_system():
     
     auth_system = AuthenticationSystem()
     
-    # Création d'un exemple de fichier password
     print("\n1. Structure du fichier password.txt:")
     print("   Format: username:salt:hash")
     print("   Exemple: alice:12345:a1b2c3d4e5f6...")
@@ -276,7 +317,7 @@ def demonstrate_system():
     print("   - 3 échecs: Blocage 5 secondes")
     print("   - 6 échecs: Blocage 10 secondes")
     print("   - 9 échecs: Blocage 15 secondes")
-    print("   - 12 échecs: Compte banni")
+    print("   - 12 échecs: Compte BANNI DÉFINITIVEMENT")
     
     input("\nAppuyez sur Entrée pour lancer le système...")
 
